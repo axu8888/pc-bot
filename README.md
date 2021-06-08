@@ -1,4 +1,4 @@
-# PC Part Bot
+# Spotify Discord Bot
 
 Discord bot to track new releases from favorite artists on Spotify.
 
