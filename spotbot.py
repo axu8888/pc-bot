@@ -10,21 +10,37 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
 import os
+import psycopg2
 
 #TO DO: add database functionality (probability PostGreSQL)
 #User table with favorite artists
 
-
+#load .env file
 load_dotenv('.env')
 
+#initialize bot
 bot = commands.Bot(command_prefix='!')
 
+
+#connect to Spotify API
 cid = os.getenv('SPOTIFY_CID')
 secret = os.getenv('SPOTIFY_SECRET')
-
 client_credentials_manager = SpotifyClientCredentials(client_id=cid, client_secret=secret)
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
+
+#connect to PostgreSQL db
+conn = psycopg2.connect(
+    host = "localhost",
+    dbname = "newReleases",
+    user = "postgres",
+    password = "247478",
+    port = "5432"
+)
+
+# cur = conn.cursor()
+# cur.execute("SHOW TABLES LIKE 'albums'")
+# print(cur.rowcount)
 
 # lz_uri = 'spotify:artist:36QJpDe2go2KgaRleHCDTp'
 
