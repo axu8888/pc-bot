@@ -15,7 +15,6 @@ class MyClient(discord.Client):
 
     async def on_ready(self):
         print('Bot activated')
-
         # create the background task and run it in the background
         self.bg_task = self.loop.create_task(self.scrape())
 
