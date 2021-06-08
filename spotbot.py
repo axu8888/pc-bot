@@ -1,11 +1,7 @@
 from discord.ext import tasks, commands
 from discord import Client
-import pandas as pd
-import praw
-import time
-import asyncio
 import discord
-import nest_asyncio
+import pandas as pd
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
@@ -30,7 +26,7 @@ sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 
 #connect to PostgreSQL db
-conn = psycopg2.connect(
+db = psycopg2.connect(
     host = "localhost",
     dbname = "newReleases",
     user = "postgres",
@@ -38,28 +34,20 @@ conn = psycopg2.connect(
     port = "5432"
 )
 
-# cur = conn.cursor()
-# cur.execute("SHOW TABLES LIKE 'albums'")
-# print(cur.rowcount)
 
-# lz_uri = 'spotify:artist:36QJpDe2go2KgaRleHCDTp'
 
-results = sp.search("Phil Wickham")
+results = sp.search("Joji")
 artist_uri = results['tracks']['items'][0]['artists'][0]['uri']
-
-
 sp_albums = sp.artist_albums(artist_uri, album_type='album')
-album_names = []
-for i in range(len(sp_albums['items'])):
-    album_names.append(sp_albums['items'][i]['name'])
-print(album_names)
+print(sp_albums['items'][0]['release_date'])
 
 
 @bot.command(name="search", help = "Search for artist")
 async def search(ctx, *args):
     name = ''.join(args[:])
     results = sp.search(name)
-
+    print(results)
+    artist_uri = ""
     try:
         artist_uri = results['tracks']['items'][0]['artists'][0]['uri']
     except:
@@ -133,12 +121,84 @@ async def angel(ctx, artist : str):
         if t == artist:
             await ctx.send(t['name'])
 
-@bot.command(name = "login")
-async def info(ctx):
-    await ctx.send(ctx.author.id)
-    await ctx.send(ctx.author.name)
 
-# def getTrackIDs()
+@bot.command(name = "register")
+async def info(ctx):
+    conn = db.cursor()
+
+    conn.execute("SELECT userid from users where userid = %s", (ctx.author.id,))
+    results = conn.fetchall()
+    if(len(results)==0):
+        try:
+            conn.execute("INSERT INTO users (userid, username) VALUES(%s, %s)", (ctx.author.id, ctx.author.name))
+            await ctx.send("User successfully registered")
+        except:
+            await ctx.send("Error registering. Please try again")
+    else:
+        await ctx.send("User already registered")
+    
+    # await ctx.send("id: " + str(ctx.author.id))
+    # await ctx.send("username: " + ctx.author.name)
+    conn.execute("SELECT * from users where userid = %s", (ctx.author.id,))
+    results = conn.fetchall()
+
+    embed = discord.Embed(title='Current User', colour = discord.Colour.red())
+    embed.add_field(name = "userId", value = results[0][0], inline = True)
+    embed.add_field(name = "username", value = results[0][1], inline = True)
+    embed.set_thumbnail(url=ctx.author.avatar_url)
+    await ctx.send(embed=embed)
+
+    db.commit()
+    conn.close()
+
+
+#TODO : add functionality to check first/last name and give suggestions
+
+#Add artist to database
+@bot.command(name = "add")
+async def favorite(ctx, *args):
+    name = ''.join(args[:])
+    name = name.lower()
+    conn = db.cursor()
+    
+
+    conn.execute("SELECT LOWER(name) from artist where name = %s", (name,))
+    query_results = conn.fetchall()
+    spotify_results = sp.search(name)
+    if(len(spotify_results['items'])==0): #check if in spotify database
+        await ctx.send("No Artist Found")
+        return
+    artist_uri = spotify_results['tracks']['items'][0]['artists'][0]['uri'] 
+    artist_name = spotify_results['tracks']['items'][0]['artists'][0]['name']
+    if(len(query_results)==0):   #check if not in postgresql database
+        conn.execute("INSERT INTO artists (name, URI) VALUES(%s, %s)", (artist_name, artist_uri))
+    
+    #check for new releases/add to database
+    sp_albums = sp.artist_albums(artist_uri, album_type='album')
+
+    album_names = []
+    album_uris = []
+    for i in range(len(sp_albums['items'])):
+        album_names.append(sp_albums['items'][i]['name'])
+        album_uris.append(sp_albums['items'][i]['uri'])
+        conn.execute("INSERT INTO albums (name, URI) VALUES(%s, %s)", (artist_name, artist_uri))
+
+
+    album_names = []
+    for i in range(len(sp_albums['items'])):
+        album_names.append(sp_albums['items'][i]['name'])
+    
+    await ctx.send(album_names)
+    
+
+    conn.execute("""SELECT songs.name from 
+                    users natural join 
+                    favorites natural join 
+                    artists natural join 
+                    creates natural join albums 
+                    natural join songs""")
+
+
 
 
 
