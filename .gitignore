@@ -1,4 +1,4 @@
 BOT_TOKEN.txt
-*.env
+.env
 bot.py
 bot1.py
