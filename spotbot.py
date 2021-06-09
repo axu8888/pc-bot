@@ -27,33 +27,47 @@ sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 #connect to PostgreSQL db
 db = psycopg2.connect(
-    host = "localhost",
-    dbname = "newReleases",
-    user = "postgres",
-    password = "247478",
-    port = "5432"
+    host = os.getenv('HOST'),
+    dbname = os.getenv('DB_NAME'),
+    user = os.getenv('USERNAME'),
+    password = os.getenv('PASSWORD'),
+    port = os.getenv('PORT')
 )
 
 
 
-results = sp.search("Joji")
-artist_uri = results['tracks']['items'][0]['artists'][0]['uri']
-sp_albums = sp.artist_albums(artist_uri, album_type='album')
-print(sp_albums['items'][0]['release_date'])
+conn = db.cursor()
+
+try:
+    a = 'a'
+    b = 'b'
+    conn.execute("INSERT INTO artists (uri, name) VALUES(%s, %s)", (a, b))  #order of column names matters
+    print("here")
+except:
+    print("wtf anthony")
+
 
 
 @bot.command(name="search", help = "Search for artist")
 async def search(ctx, *args):
-    name = ''.join(args[:])
+    name = ' '.join(args[:])
     results = sp.search(name)
-    print(results)
-    artist_uri = ""
+    # print(name)
+    
+    artists = ""
     try:
-        artist_uri = results['tracks']['items'][0]['artists'][0]['uri']
+        artists = results['tracks']['items'][0]['artists']
     except:
         await ctx.send("No Artist Found")
-
-    sp_albums = sp.artist_albums(artist_uri, album_type='album')
+    artist_uri = ""
+    #print(artists)
+    for i in range(len(artists)):
+        print(i)
+        if(name.lower() in artists[i]['name'].lower()):
+            artist_uri = artists[i]['uri']
+            break
+    #print(artist_uri)
+    sp_albums = sp.artist_albums(artist_uri)
 
     album_names = []
     for i in range(len(sp_albums['items'])):
@@ -157,40 +171,52 @@ async def info(ctx):
 #Add artist to database
 @bot.command(name = "add")
 async def favorite(ctx, *args):
-    name = ''.join(args[:])
+    name = ' '.join(args[:])
     name = name.lower()
     conn = db.cursor()
     
 
-    conn.execute("SELECT LOWER(name) from artist where name = %s", (name,))
+    conn.execute("SELECT LOWER(name) from artists where name = %s", (name,))
     query_results = conn.fetchall()
     spotify_results = sp.search(name)
-    if(len(spotify_results['items'])==0): #check if in spotify database
-        await ctx.send("No Artist Found")
+    try:
+        artists = spotify_results['tracks']['items'][0]['artists']
+    except:
+        await ctx.send("No Artist Found")  #check if in spotify database
         return
+    artist_uri = ""
+    for i in range(len(artists)):
+        if(name.lower() in artists[i]['name'].lower()):
+            artist_uri = artists[i]['uri']
+            break
+    #print(artist_uri)
+    sp_albums = sp.artist_albums(artist_uri)
     artist_uri = spotify_results['tracks']['items'][0]['artists'][0]['uri'] 
     artist_name = spotify_results['tracks']['items'][0]['artists'][0]['name']
     if(len(query_results)==0):   #check if not in postgresql database
-        conn.execute("INSERT INTO artists (name, URI) VALUES(%s, %s)", (artist_name, artist_uri))
+        conn.execute("INSERT INTO artists (uri, name) VALUES(%s, %s)", (artist_uri, artist_name))
     
     #check for new releases/add to database
-    sp_albums = sp.artist_albums(artist_uri, album_type='album')
+    sp_albums = sp.artist_albums(artist_uri)
 
-    album_names = []
     album_uris = []
     for i in range(len(sp_albums['items'])):
-        album_names.append(sp_albums['items'][i]['name'])
         album_uris.append(sp_albums['items'][i]['uri'])
-        conn.execute("INSERT INTO albums (name, URI) VALUES(%s, %s)", (artist_name, artist_uri))
+        conn.execute("INSERT INTO albums (name, uri, releasedate) VALUES(%s, %s, %s)", (sp_albums['items'][i]['name'], 
+                                                                                    sp_albums['items'][i]['uri'], 
+                                                                                    sp_albums['items'][i]['release_date']))
+    # conn.execute("DROP TEMPORARY TABLE IF EXISTS CHECK")
+    # conn.execute("""CREATE TEMPORARY TABLE check_songs(
+    #             URI text
+    #             )
+    #             """)
 
-
-    album_names = []
-    for i in range(len(sp_albums['items'])):
-        album_names.append(sp_albums['items'][i]['name'])
+    # conn.execute()
+    # for uri in album_uris:
+        
     
-    await ctx.send(album_names)
-    
-
+@bot.command(name = "show")
+async def show(ctx):
     conn.execute("""SELECT songs.name from 
                     users natural join 
                     favorites natural join 
