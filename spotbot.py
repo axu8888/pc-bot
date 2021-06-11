@@ -25,48 +25,57 @@ client_credentials_manager = SpotifyClientCredentials(client_id=cid, client_secr
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 
-#connect to PostgreSQL db
+# connect to PostgreSQL db
 db = psycopg2.connect(
     host = os.getenv('HOST'),
     dbname = os.getenv('DB_NAME'),
-    user = os.getenv('USERNAME'),
+    user = os.getenv('USER'),
     password = os.getenv('PASSWORD'),
     port = os.getenv('PORT')
 )
 
-
-
 conn = db.cursor()
 
-try:
-    a = 'a'
-    b = 'b'
-    conn.execute("INSERT INTO artists (uri, name) VALUES(%s, %s)", (a, b))  #order of column names matters
-    print("here")
-except:
-    print("wtf anthony")
+# try:
+#     a = 'a'
+#     b = 'b'
+#     conn.execute("INSERT INTO artists (uri, name) VALUES(%s, %s)", (a, b))  #order of column names matters
+#     print("here")
+# except:
+#     print("error")
 
-
+#returns true if d1 is >= d2, meaning if d1 is more recent than d2
+def compare_dates(d1, d2):
+    d1 = d1.split('-')
+    d2 = d2.split('-')
+    for i in range(len(d1)):
+        if(int(d1[i])>int(d2[i])):
+            return True
+        elif(int(d1[i])<int(d2[i])):
+            return False
+    return True
 
 @bot.command(name="search", help = "Search for artist")
 async def search(ctx, *args):
     name = ' '.join(args[:])
+    
     results = sp.search(name)
-    # print(name)
     
     artists = ""
     try:
         artists = results['tracks']['items'][0]['artists']
     except:
         await ctx.send("No Artist Found")
+
+
     artist_uri = ""
-    #print(artists)
     for i in range(len(artists)):
         print(i)
         if(name.lower() in artists[i]['name'].lower()):
             artist_uri = artists[i]['uri']
             break
-    #print(artist_uri)
+    if(artist_uri == ''):
+        await ctx.send("No Artist Found")
     sp_albums = sp.artist_albums(artist_uri)
 
     album_names = []
@@ -172,39 +181,104 @@ async def info(ctx):
 @bot.command(name = "add")
 async def favorite(ctx, *args):
     name = ' '.join(args[:])
-    name = name.lower()
     conn = db.cursor()
     
 
-    conn.execute("SELECT LOWER(name) from artists where name = %s", (name,))
-    query_results = conn.fetchall()
     spotify_results = sp.search(name)
+    name = name.lower()
+
     try:
         artists = spotify_results['tracks']['items'][0]['artists']
     except:
         await ctx.send("No Artist Found")  #check if in spotify database
         return
     artist_uri = ""
+    artist_name = ""  #artist name in spotify database
     for i in range(len(artists)):
         if(name.lower() in artists[i]['name'].lower()):
             artist_uri = artists[i]['uri']
+            artist_name = artists[i]['name']
             break
-    #print(artist_uri)
-    sp_albums = sp.artist_albums(artist_uri)
-    artist_uri = spotify_results['tracks']['items'][0]['artists'][0]['uri'] 
-    artist_name = spotify_results['tracks']['items'][0]['artists'][0]['name']
-    if(len(query_results)==0):   #check if not in postgresql database
+    print(artist_name)
+    print(artist_uri)
+    if(artist_uri == ''):
+        await ctx.send("No Artist Found")
+        return
+    # artist_uri = spotify_results['tracks']['items'][0]['artists'][0]['uri'] 
+    # artist_name = spotify_results['tracks']['items'][0]['artists'][0]['name']
+
+    #check if not in postgresql database
+    conn.execute("SELECT artistid from artists where name = %s", (artist_name,))
+    query_results = conn.fetchall()
+    artist_id = -1
+    if(len(query_results)==0):   
+        await ctx.send("Artist successfully added")
         conn.execute("INSERT INTO artists (uri, name) VALUES(%s, %s)", (artist_uri, artist_name))
-    
+        
+        conn.execute("SELECT artistid FROM artists WHERE artists.name = %s", (artist_name,))
+        results = conn.fetchall()
+        artist_id = results[0][0]
+
+        conn.execute("""INSERT INTO favorites (userid, artistid)
+                        VALUES(%s, %s)
+                    """, (ctx.author.id, artist_id))
+    else:
+        artist_id = query_results[0][0]
+        await ctx.send("Artist already added")
+
     #check for new releases/add to database
     sp_albums = sp.artist_albums(artist_uri)
-
     album_uris = []
-    for i in range(len(sp_albums['items'])):
-        album_uris.append(sp_albums['items'][i]['uri'])
-        conn.execute("INSERT INTO albums (name, uri, releasedate) VALUES(%s, %s, %s)", (sp_albums['items'][i]['name'], 
-                                                                                    sp_albums['items'][i]['uri'], 
-                                                                                    sp_albums['items'][i]['release_date']))
+
+    await ctx.send("New Releases")  #embed?
+
+    sp_albums = sp_albums['items']
+    album_set = ()
+    prev = "hopefully no album is named this"
+
+    #albums ordered by date (most recently added), so compare with most recent date
+    conn.execute("""SELECT releasedate FROM albums
+                    WHERE releasedate >= ALL(SELECT releasedate FROM albums)""")
+    results = conn.fetchall()
+    most_recent = results[0][0]
+
+    for i in range(len(sp_albums)):
+        curr_name = sp_albums[i]['name']
+
+        #check for duplicates on same date
+        if(prev == curr_name):
+            continue
+        prev = curr_name
+        curr_uri = sp_albums[i]['uri']
+        curr_release = sp_albums[i]['release_date']
+
+        album_uris.append(curr_uri)
+        try:
+            #if release date is only year, just set to January 1st
+            if('-' not in curr_release):
+                curr_release = curr_release + '-01-01'
+
+            #if current release is not new release (not in database)
+            if(compare_dates(curr_release, most_recent) == False):
+                return
+
+            conn.execute("INSERT INTO albums (name, uri, releasedate) VALUES(%s, %s, %s)", (curr_name, 
+                                                                                        curr_uri, 
+                                                                                        curr_release))
+            await ctx.send(curr_name + " " + curr_uri + " " + curr_release)
+            conn.execute("SELECT albumid FROM albums where albums.uri = %s", (curr_uri,))
+            results = conn.fetchall()
+            album_id = results[0][0]
+            print(int(album_id))
+            conn.execute("INSERT INTO creates (artistid, albumid) VALUES(%s, %s)", (artist_id, album_id))
+        except:
+            continue
+        
+
+     #albums ordered by release date, so just check up until first album already in db
+     #subcommand to list artists
+        
+    
     # conn.execute("DROP TEMPORARY TABLE IF EXISTS CHECK")
     # conn.execute("""CREATE TEMPORARY TABLE check_songs(
     #             URI text
@@ -213,7 +287,8 @@ async def favorite(ctx, *args):
 
     # conn.execute()
     # for uri in album_uris:
-        
+    db.commit()
+    conn.close()   
     
 @bot.command(name = "show")
 async def show(ctx):
@@ -225,7 +300,8 @@ async def show(ctx):
                     natural join songs""")
 
 
-
+db.commit()
+conn.close()
 
 
 with open("BOT_TOKEN.txt", "r") as token_file:
