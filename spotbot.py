@@ -36,6 +36,8 @@ db = psycopg2.connect(
 
 conn = db.cursor()
 
+
+
 # try:
 #     a = 'a'
 #     b = 'b'
@@ -54,6 +56,7 @@ def compare_dates(d1, d2):
         elif(int(d1[i])<int(d2[i])):
             return False
     return True
+
 
 @bot.command(name="search", help = "Search for artist")
 async def search(ctx, *args):
@@ -240,9 +243,11 @@ async def favorite(ctx, *args):
     conn.execute("""SELECT releasedate FROM albums
                     WHERE releasedate >= ALL(SELECT releasedate FROM albums)""")
     results = conn.fetchall()
-    most_recent = results[0][0]
+    most_recent = '00-00-0000'
+    if(len(results) != 0):
+        most_recent = results[0][0]
 
-    for i in range(len(sp_albums)):
+    for i in range(len(sp_albums)):  #for each album
         curr_name = sp_albums[i]['name']
 
         #check for duplicates on same date
@@ -265,43 +270,51 @@ async def favorite(ctx, *args):
             conn.execute("INSERT INTO albums (name, uri, releasedate) VALUES(%s, %s, %s)", (curr_name, 
                                                                                         curr_uri, 
                                                                                         curr_release))
-            await ctx.send(curr_name + " " + curr_uri + " " + curr_release)
+            #await ctx.send(curr_name + " " + curr_uri + " " + curr_release)
             conn.execute("SELECT albumid FROM albums where albums.uri = %s", (curr_uri,))
             results = conn.fetchall()
             album_id = results[0][0]
-            print(int(album_id))
             conn.execute("INSERT INTO creates (artistid, albumid) VALUES(%s, %s)", (artist_id, album_id))
+
+            tracks = sp.album_tracks(curr_uri)['items']
+            print(len(tracks))
+            for i in range(len(tracks)):
+                song_name = tracks[i]['name']
+                song_uri = tracks[i]['uri']
+                conn.execute("INSERT INTO songs (albumid, name, uri) VALUES(%s, %s, %s)", (album_id, song_name, song_uri))
+                #await ctx.send(curr_name + " " + song_name + " " + song_uri)
         except:
             continue
         
-
-     #albums ordered by release date, so just check up until first album already in db
-     #subcommand to list artists
         
     
-    # conn.execute("DROP TEMPORARY TABLE IF EXISTS CHECK")
-    # conn.execute("""CREATE TEMPORARY TABLE check_songs(
-    #             URI text
-    #             )
-    #             """)
 
     # conn.execute()
     # for uri in album_uris:
     db.commit()
     conn.close()   
     
-@bot.command(name = "show")
-async def show(ctx):
-    conn.execute("""SELECT songs.name from 
-                    users natural join 
-                    favorites natural join 
-                    artists natural join 
-                    creates natural join albums 
-                    natural join songs""")
+@bot.command(name = "show", help = 'Show artists and their albums')
+async def show(ctx, arg):
+    if(arg.lower() == 'artists'):
+        conn.execute("""SELECT artists.name from 
+                        users natural join favorites 
+                        natural join artists
+                        """)
+        artists = conn.fetchall()
+        for artist in artists:
+            await ctx.send(artist)
+    elif(arg.lower() == 'songs'):
+        conn.execute("""SELECT songs.name from 
+                        users natural join 
+                        favorites natural join 
+                        artists natural join 
+                        creates natural join albums 
+                        natural join songs""")
+    elif():
+        await ctx.send("Invalid Command")
 
 
-db.commit()
-conn.close()
 
 
 with open("BOT_TOKEN.txt", "r") as token_file:
